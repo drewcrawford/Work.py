@@ -1,6 +1,9 @@
 from JucheLog.juchelog import juche
 import os
 import sys
+import re
+from fogbugzConnect import FogBugzConnect
+
 class bcolors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -82,7 +85,6 @@ class GitConnect:
             raise Exception("Command returned invalid status: %d; %s; %s" % (status,cmd,output))
 
     def resetHard_INCREDIBLY_DESTRUCTIVE_COMMAND(self):
-        import os
         for root,dirs,files in os.walk(self.wd):
 
             self.statusOutput("git clean -d -x -ff",wd=root)
@@ -166,6 +168,7 @@ class GitConnect:
     def __mergeInPretend(self,BRANCH_NAME): #http://stackoverflow.com/questions/501407/is-there-a-git-merge-dry-run-option/6283843#6283843
         self.checkForUnsavedChanges()
         (status,output) = self.statusOutput("git merge --no-commit --no-ff %s" % BRANCH_NAME)
+        self.annotateMergeCommit()
         if status:
             with juche.revolution(output=output):
                 juche.warning("gitConnect __mergeInPretend: merge %s will not apply cleanly.  " % BRANCH_NAME)
@@ -174,6 +177,14 @@ class GitConnect:
         self.checkForUnsavedChanges()
         return status==0
 
+    def annotateMergeCommit(self):
+        (status, msg) = self.statusOutput('git log -n 1 --format="%s"')
+        matches = re.finditer(r'work-(\d+)', msg)
+        fb = FogBugzConnect()
+        for match in matches:
+            fbcase = fb.fbConnection.search(q=match.group(1), cols="sTitle")
+            msg = msg.replace(match.group(1), "%s (%s)" % (match.group(1), fbcase.stitle.contents[0].encode('utf-8')))
+        os.system('git commit --amend -m "%s"' % msg)
     #
     #
     #
@@ -182,6 +193,7 @@ class GitConnect:
             return self.__mergeInPretend(BRANCH_NAME)
         with juche.revolution(merging_in=BRANCH_NAME):
             (status,output) = self.statusOutput("git merge --no-ff %s" % BRANCH_NAME)
+            self.annotateMergeCommit()
             juche.info(output)
             if status:
                 juche.error("merge was unsuccessful.")
@@ -418,6 +430,16 @@ class TestSequence(unittest.TestCase):
         self.assertTrue(g.mergeIn("remotes/origin/merge_b",pretend=True))
         g.mergeIn("remotes/origin/merge_a") #no pretend
         self.assertFalse(g.mergeIn("remotes/origin/merge_b",pretend=True))
+
+        system("rm -rf /tmp/g")
+
+    def test_merge_real(self):
+        from os import system
+        system("rm -rf /tmp/g")
+        GitConnect.clone("git://github.com/drewcrawford/work.py.git","/tmp/g")
+        g = GitConnect("/tmp/g")
+        g.mergeIn("remotes/origin/work-2999")
+        g.mergeIn("remotes/origin/work-3100")
 
         system("rm -rf /tmp/g")
 
